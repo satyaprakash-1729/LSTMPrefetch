@@ -46,7 +46,7 @@ def parse_data(FINAL_DATA_FILE = "data_processed.csv", final_data = {"delta": []
 
 from sklearn.cluster import KMeans
 
-def get_and_analyze_data(DATA_FILE="data_processed.csv", start_perc=0, max_cnt=50000, plot=False):
+def get_and_analyze_data(DATA_FILE="data_processed.csv", start_perc=0.1, max_cnt=50, plot=False):
 	data = pd.read_csv(DATA_FILE, sep='\t')
 	start_pos = int(data.shape[0] * (start_perc))
 	data1 = data[start_pos:]
@@ -57,89 +57,90 @@ def get_and_analyze_data(DATA_FILE="data_processed.csv", start_perc=0, max_cnt=5
 		yaddr = data["addr"].astype(float).values[start_pos:start_pos+max_cnt]
 		x = np.array([i for i in range(len(y))])
 
-		y = y.reshape(-1, 1)
-		kmeans = KMeans(n_clusters=3, random_state=0).fit(y)
-		y = y.reshape(-1)
+		yaddr = yaddr.reshape(-1, 1)
+		kmeans = KMeans(n_clusters=2, random_state=0).fit(yaddr)
+		yaddr = yaddr.reshape(-1)
 
-		first = y[kmeans.labels_==0]
-		second = y[kmeans.labels_==1]
-		third = y[kmeans.labels_==2]
+		first = yaddr[kmeans.labels_==0]
+		second = yaddr[kmeans.labels_==1]
 
 		firstx = x[kmeans.labels_==0]
 		secondx = x[kmeans.labels_==1]
-		thirdx = x[kmeans.labels_==2]
 
 		plt.figure(1)
-		plt.title("Delta over time")
-		plt.xlabel("reference index")
-		plt.ylabel("Delta")
-		# plt.plot(x, y, 'r.')
+		plt.title("Address over time")
+		plt.xlabel("Index")
+		plt.ylabel("Address")
 		plt.plot(firstx, first, 'r.')
-		plt.plot(secondx, second, 'g.')
-		plt.plot(thirdx, third, 'b.')
+		plt.plot(secondx, second, 'b.')
 		plt.show()
 
 		plt.figure(2)
-		plt.title("Addr over time")
+		plt.title("Delta over time")
 		plt.xlabel("Index")
-		plt.ylabel("Addr")
+		plt.ylabel("Delta")
+		plt.plot(x, y, 'k.')
 		plt.show()
 
 	return data1
 
 
-def create_dataset(data, maxlen=10, data_cnt=5000):
+def create_dataset(data, maxlen=10, data_cnt=50000):
 
 	scaler = MinMaxScaler((0, 10))
 
 	deltas = data["delta"].astype(float).values[:data_cnt*10]
 	ips = data["ip"].astype(float).values[:data_cnt*10]
+	addrs = data["addr"].astype(float).values[:data_cnt*10]
 
 	ips = ips.reshape(-1, 1)
 	ips = scaler.fit_transform(ips)
 	ips = ips.reshape(-1)
 
-	deltas = deltas.reshape(-1, 1)
-	kmeans = KMeans(n_clusters=3, random_state=0).fit(deltas)
-	deltas = deltas.reshape(-1)
+	addrs = addrs.reshape(-1, 1)
+	kmeans = KMeans(n_clusters=2, random_state=0).fit(addrs)
+	addrs = addrs.reshape(-1)
 
 	cluster_ids = kmeans.labels_[:]
 
 	firstclass = deltas[kmeans.labels_==0]
 	secondclass = deltas[kmeans.labels_==1]
-	thirdclass = deltas[kmeans.labels_==2]
+	# thirdclass = deltas[kmeans.labels_==2]
 
 	firstclass = firstclass.reshape(-1, 1)
 	secondclass = secondclass.reshape(-1, 1)
-	thirdclass = thirdclass.reshape(-1, 1)
+	# thirdclass = thirdclass.reshape(-1, 1)
 	firstclass = scaler.fit_transform(firstclass)
 	secondclass = scaler.fit_transform(secondclass)
-	thirdclass = scaler.fit_transform(thirdclass)
+	# thirdclass = scaler.fit_transform(thirdclass)
 	firstclass = firstclass.reshape(-1)
 	secondclass = secondclass.reshape(-1)
-	thirdclass = thirdclass.reshape(-1)
+	# thirdclass = thirdclass.reshape(-1)
 
-	deltas[cluster_ids==0] = firstclass
-	deltas[cluster_ids==1] = secondclass
-	deltas[cluster_ids==2] = thirdclass
+	addrs[cluster_ids==0] = firstclass
+	addrs[cluster_ids==1] = secondclass
+	# deltas[cluster_ids==2] = thirdclass
 
 	ng1 = ngrams(ips, maxlen+1)
 	ng2 = ngrams(deltas, maxlen+1)
 	ng3 = ngrams(cluster_ids, maxlen+1)
+	ng4 = ngrams(addrs, maxlen+1)
 
 	ng1 = [ngg for ngg in ng1]
 	ng2 = [ngg for ngg in ng2]
 	ng3 = [ngg for ngg in ng3]
+	ng4 = [ngg for ngg in ng4]
 	inds = np.random.choice([i for i in range(len(ng1))], data_cnt, replace=False)
 	
 	ng1 = np.array(ng1)[inds]
 	ng2 = np.array(ng2)[inds]
 	ng3 = np.array(ng3)[inds]
+	ng4 = np.array(ng4)[inds]
 
 	X = []
 	y = []
 	for indx, _ in enumerate(ng1):
-		X.append(list(zip(ng1[indx][:-1], ng2[indx][:-1], ng3[indx][:-1])))
+		X.append(list(zip(ng1[indx][:-1], ng4[indx][:-1], ng3[indx][:-1])))
 		y.append(ng2[indx][-1])
 
 	return np.array(X).reshape(-1, maxlen, 3), np.array(y)
@@ -165,6 +166,7 @@ def get_lstm_model(X, y, rnn_units=32, batch_size=64, maxlen=10, num_labels=3):
 
 # parse_data()
 data = get_and_analyze_data(start_perc=0.005, plot=True)
-# X, y = create_dataset(data, data_cnt=100000)
-# model = get_lstm_model(X, y, rnn_units=64, batch_size=256)
+X, y = create_dataset(data, data_cnt=100000)
+print(X[:5], y[:5])
+model = get_lstm_model(X, y, rnn_units=64, batch_size=256)
 # parse_data()
