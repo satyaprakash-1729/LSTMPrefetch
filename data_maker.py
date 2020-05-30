@@ -7,6 +7,7 @@ from nltk import ngrams
 from sklearn.preprocessing import MinMaxScaler
 from datetime import datetime
 import tensorflow.keras.backend as K
+from keras.utils import to_categorical
 
 
 logdir = "logs/scalars/" + datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -46,11 +47,25 @@ def parse_data(FINAL_DATA_FILE = "data_processed.csv", final_data = {"delta": []
 
 from sklearn.cluster import KMeans
 
-def get_and_analyze_data(DATA_FILE="data_processed.csv", start_perc=0.1, max_cnt=50, plot=False):
+def get_and_analyze_data(DATA_FILE="data_processed.csv", start_perc=0.1, max_cnt=500, plot=False):
 	data = pd.read_csv(DATA_FILE, sep='\t')
 	start_pos = int(data.shape[0] * (start_perc))
 	data1 = data[start_pos:]
 	print("Unique PCs: ", data["ip"].nunique())
+	print("Unique Deltas: ", data["delta"].nunique())
+
+
+	# n, bins, patches = plt.hist(data["delta"].astype(float).values[start_pos:start_pos+max_cnt], density=True, bins=1000)
+	# print("n --> ", n)
+	# print("bins --> ", bins)
+	# print("patches --> ", patches)
+	# print()
+	# for patch in patches:
+	# 	print(patch.get_extents())
+	# 	print(patch.get_width())
+	# 	print(patch.get_window_extent())
+	# 	break
+
 	if plot:
 		start_pos = int(data.shape[0] * (start_perc))
 		y = data["delta"].astype(float).values[start_pos:start_pos+max_cnt]
@@ -82,16 +97,53 @@ def get_and_analyze_data(DATA_FILE="data_processed.csv", start_perc=0.1, max_cnt
 		plt.plot(x, y, 'k.')
 		plt.show()
 
+		# plt.figure(3)
+		# plt.title("Hist for cluster id = 1")
+		# plt.hist(y[kmeans.labels_==1], bins=300)
+		# plt.show()
+
 	return data1
 
+def get_bin(value, start1, end1, start2, end2, start3, end3, binsize1, binsize2, binsize3, num_classes=3000):
+	if value > end3 or value < start1:
+		return num_classes
+	if value <= end1 and value >= start1:
+		return int((value-start1+binsize1-0.01)/binsize1)
+	if value <= end2 and value >= start2:
+		return int((value-start2+binsize2-0.01)/binsize2)+(num_classes//3)
+	if value <= end3 and value >= start3:
+		return int((value-start3+binsize3-0.01)/binsize3)+((2*num_classes)//3)
 
-def create_dataset(data, maxlen=10, data_cnt=50000):
+
+def create_dataset(data, maxlen=10, data_cnt=50000, num_classes=3000):
 
 	scaler = MinMaxScaler((0, 10))
 
 	deltas = data["delta"].astype(float).values[:data_cnt*10]
 	ips = data["ip"].astype(float).values[:data_cnt*10]
 	addrs = data["addr"].astype(float).values[:data_cnt*10]
+
+	deltas = deltas.reshape(-1, 1)
+	kmeans = KMeans(n_clusters=3, random_state=0).fit(deltas)
+	deltas = deltas.reshape(-1)
+
+	range1 = deltas[kmeans.labels_==0]
+	start1, end1 = min(range1), max(range1)
+	range2 = deltas[kmeans.labels_==1]
+	start2, end2 = min(range2), max(range2)
+	range3 = deltas[kmeans.labels_==2]
+	start3, end3 = min(range3), max(range3)
+
+	print(start1, end1)
+	print(start2, end2)
+	print(start3, end3)
+	binsize1 = 3*(end1-start1)/num_classes
+	binsize2 = 3*(end2-start2)/num_classes
+	binsize3 = 3*(end3-start3)/num_classes
+
+	print(binsize1, binsize2, binsize3)
+
+	deltas = [get_bin(delt, start1, end1, start2, end2, start3, end3, binsize1, binsize2, binsize3, num_classes) for delt in deltas]
 
 	ips = ips.reshape(-1, 1)
 	ips = scaler.fit_transform(ips)
@@ -103,8 +155,8 @@ def create_dataset(data, maxlen=10, data_cnt=50000):
 
 	cluster_ids = kmeans.labels_[:]
 
-	firstclass = deltas[kmeans.labels_==0]
-	secondclass = deltas[kmeans.labels_==1]
+	firstclass = addrs[cluster_ids==0]
+	secondclass = addrs[cluster_ids==1]
 	# thirdclass = deltas[kmeans.labels_==2]
 
 	firstclass = firstclass.reshape(-1, 1)
@@ -143,6 +195,7 @@ def create_dataset(data, maxlen=10, data_cnt=50000):
 		X.append(list(zip(ng1[indx][:-1], ng4[indx][:-1], ng3[indx][:-1])))
 		y.append(ng2[indx][-1])
 
+	y = to_categorical(y, num_classes=num_classes+1)
 	return np.array(X).reshape(-1, maxlen, 3), np.array(y)
 
 
@@ -152,21 +205,20 @@ def coeff_determination(y_true, y_pred):
     return ( 1 - SS_res/(SS_tot + K.epsilon()) )
 
 
-def get_lstm_model(X, y, rnn_units=32, batch_size=64, maxlen=10, num_labels=3):
+def get_lstm_model(X, y, rnn_units=32, batch_size=64, maxlen=10, num_labels=3, num_classes=3000):
 	input_layer1 = tf.keras.layers.Input(shape=(maxlen, 3, ), name='input1')
 	lstm_layer1 = tf.keras.layers.LSTM(rnn_units, activation='relu')(input_layer1)
-	prediction = tf.keras.layers.Dense(1)(lstm_layer1)
+	prediction = tf.keras.layers.Dense(num_classes+1, activation='softmax')(lstm_layer1)
 
 	model = tf.keras.models.Model(inputs=input_layer1, outputs=prediction)
-	model.compile(optimizer=tf.keras.optimizers.Adam(lr=0.01), loss='mse', metrics=[coeff_determination])
+	model.compile(optimizer=tf.keras.optimizers.Adam(lr=0.001), loss='categorical_crossentropy', metrics=['accuracy'])
 	print(model.summary())
 
 	model.fit(X, y, batch_size=32, epochs=3, validation_split=0.1, callbacks=[tensorboard_callback])
 	return model
 
 # parse_data()
-data = get_and_analyze_data(start_perc=0.005, plot=True)
-X, y = create_dataset(data, data_cnt=100000)
-print(X[:5], y[:5])
-model = get_lstm_model(X, y, rnn_units=64, batch_size=256)
+data = get_and_analyze_data(start_perc=0.05, plot=False)
+X, y = create_dataset(data, data_cnt=100000, num_classes=10000)
+model = get_lstm_model(X, y, rnn_units=64, batch_size=64, num_classes=10000)
 # parse_data()
