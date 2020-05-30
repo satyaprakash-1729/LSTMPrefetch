@@ -110,14 +110,9 @@ def create_dataset(data, maxlen=10, data_cnt=50000, num_classes=3000):
 
 	scaler = MinMaxScaler((0, 10))
 
-	deltas = data["delta"].astype(float).values[:data_cnt*10]
-	ips = data["ip"].astype(float).values[:data_cnt*10]
-	addrs = data["addr"].astype(float).values[:data_cnt*10]
-
-
-	deltas = deltas.reshape(-1, 1)
-	kmeans = KMeans(n_clusters=3, random_state=0).fit(deltas)
-	deltas = deltas.reshape(-1)
+	deltas = data["delta"].astype(float).values[:data_cnt*100]
+	ips = data["ip"].astype(float).values[:data_cnt*100]
+	addrs = data["addr"].astype(float).values[:data_cnt*100]
 
 	del_freq = Counter(deltas)
 	max10000 = del_freq.most_common(num_classes)
@@ -137,21 +132,18 @@ def create_dataset(data, maxlen=10, data_cnt=50000, num_classes=3000):
 
 	firstclass = addrs[cluster_ids==0]
 	secondclass = addrs[cluster_ids==1]
-	# thirdclass = deltas[kmeans.labels_==2]
 
 	firstclass = firstclass.reshape(-1, 1)
 	secondclass = secondclass.reshape(-1, 1)
-	# thirdclass = thirdclass.reshape(-1, 1)
+
 	firstclass = scaler.fit_transform(firstclass)
 	secondclass = scaler.fit_transform(secondclass)
-	# thirdclass = scaler.fit_transform(thirdclass)
+
 	firstclass = firstclass.reshape(-1)
 	secondclass = secondclass.reshape(-1)
-	# thirdclass = thirdclass.reshape(-1)
 
 	addrs[cluster_ids==0] = firstclass
 	addrs[cluster_ids==1] = secondclass
-	# deltas[cluster_ids==2] = thirdclass
 
 	ng1 = ngrams(ips, maxlen+1)
 	ng2 = ngrams(deltas, maxlen+1)
