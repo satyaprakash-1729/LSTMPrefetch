@@ -8,6 +8,7 @@ from sklearn.preprocessing import MinMaxScaler
 from datetime import datetime
 import tensorflow.keras.backend as K
 from keras.utils import to_categorical
+from collections import Counter
 
 
 logdir = "logs/scalars/" + datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -104,16 +105,6 @@ def get_and_analyze_data(DATA_FILE="data_processed.csv", start_perc=0.1, max_cnt
 
 	return data1
 
-def get_bin(value, start1, end1, start2, end2, start3, end3, binsize1, binsize2, binsize3, num_classes=3000):
-	if value > end3 or value < start1:
-		return num_classes
-	if value <= end1 and value >= start1:
-		return int((value-start1+binsize1-0.01)/binsize1)
-	if value <= end2 and value >= start2:
-		return int((value-start2+binsize2-0.01)/binsize2)+(num_classes//3)
-	if value <= end3 and value >= start3:
-		return int((value-start3+binsize3-0.01)/binsize3)+((2*num_classes)//3)
-
 
 def create_dataset(data, maxlen=10, data_cnt=50000, num_classes=3000):
 
@@ -123,27 +114,16 @@ def create_dataset(data, maxlen=10, data_cnt=50000, num_classes=3000):
 	ips = data["ip"].astype(float).values[:data_cnt*10]
 	addrs = data["addr"].astype(float).values[:data_cnt*10]
 
+
 	deltas = deltas.reshape(-1, 1)
 	kmeans = KMeans(n_clusters=3, random_state=0).fit(deltas)
 	deltas = deltas.reshape(-1)
 
-	range1 = deltas[kmeans.labels_==0]
-	start1, end1 = min(range1), max(range1)
-	range2 = deltas[kmeans.labels_==1]
-	start2, end2 = min(range2), max(range2)
-	range3 = deltas[kmeans.labels_==2]
-	start3, end3 = min(range3), max(range3)
-
-	print(start1, end1)
-	print(start2, end2)
-	print(start3, end3)
-	binsize1 = 3*(end1-start1)/num_classes
-	binsize2 = 3*(end2-start2)/num_classes
-	binsize3 = 3*(end3-start3)/num_classes
-
-	print(binsize1, binsize2, binsize3)
-
-	deltas = [get_bin(delt, start1, end1, start2, end2, start3, end3, binsize1, binsize2, binsize3, num_classes) for delt in deltas]
+	del_freq = Counter(deltas)
+	max10000 = del_freq.most_common(num_classes)
+	del_list = {}
+	for idx, delta in enumerate(max10000):
+		del_list[delta[0]] = idx
 
 	ips = ips.reshape(-1, 1)
 	ips = scaler.fit_transform(ips)
@@ -192,10 +172,11 @@ def create_dataset(data, maxlen=10, data_cnt=50000, num_classes=3000):
 	X = []
 	y = []
 	for indx, _ in enumerate(ng1):
-		X.append(list(zip(ng1[indx][:-1], ng4[indx][:-1], ng3[indx][:-1])))
-		y.append(ng2[indx][-1])
+		if ng2[indx][-1] in del_list:
+			X.append(list(zip(ng1[indx][:-1], ng4[indx][:-1], ng3[indx][:-1])))
+			y.append(del_list[ng2[indx][-1]])
 
-	y = to_categorical(y, num_classes=num_classes+1)
+	y = to_categorical(y, num_classes=num_classes)
 	return np.array(X).reshape(-1, maxlen, 3), np.array(y)
 
 
@@ -208,17 +189,17 @@ def coeff_determination(y_true, y_pred):
 def get_lstm_model(X, y, rnn_units=32, batch_size=64, maxlen=10, num_labels=3, num_classes=3000):
 	input_layer1 = tf.keras.layers.Input(shape=(maxlen, 3, ), name='input1')
 	lstm_layer1 = tf.keras.layers.LSTM(rnn_units, activation='relu')(input_layer1)
-	prediction = tf.keras.layers.Dense(num_classes+1, activation='softmax')(lstm_layer1)
+	prediction = tf.keras.layers.Dense(num_classes, activation='softmax')(lstm_layer1)
 
 	model = tf.keras.models.Model(inputs=input_layer1, outputs=prediction)
-	model.compile(optimizer=tf.keras.optimizers.Adam(lr=0.001), loss='categorical_crossentropy', metrics=['accuracy'])
+	model.compile(optimizer=tf.keras.optimizers.Adam(lr=0.005), loss='categorical_crossentropy', metrics=['accuracy'])
 	print(model.summary())
 
-	model.fit(X, y, batch_size=32, epochs=3, validation_split=0.1, callbacks=[tensorboard_callback])
+	model.fit(X, y, batch_size=64, epochs=3, validation_split=0.1, callbacks=[tensorboard_callback])
 	return model
 
 # parse_data()
 data = get_and_analyze_data(start_perc=0.05, plot=False)
-X, y = create_dataset(data, data_cnt=100000, num_classes=10000)
-model = get_lstm_model(X, y, rnn_units=64, batch_size=64, num_classes=10000)
+X, y = create_dataset(data, data_cnt=200000, num_classes=2000, maxlen=20)
+model = get_lstm_model(X, y, rnn_units=128, batch_size=256, num_classes=2000, maxlen=20)
 # parse_data()
