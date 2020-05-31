@@ -187,7 +187,7 @@ class MyCustomCallback(tf.keras.callbacks.Callback):
     self.k = k
 
   def on_train_batch_end(self, batch, logs=None):
-    if batch%1000!=0:
+    if (batch+1)%1500!=0:
       return
     y_test_pred = self.model.predict(self.X_test)
     topk = y_test_pred.argsort()[:, -self.k:]
@@ -244,3 +244,6 @@ print("Validation X & y: ", X_test.shape, y_test.shape)
 # with strategy.scope():
 model = get_lstm_model(X_train, y_train, X_test, y_test, rnn_units=512, batch_size=8, num_classes=5000, maxlen=5, epochs=10, toplot=True)
 
+with open('./model_for_cpp.json', 'w') as fout:
+    fout.write(model.to_json())
+model.save_weights('./model_for_cpp_weights.h5', overwrite=True)
